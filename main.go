@@ -8,7 +8,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/lithammer/shortuuid"
 	"github.com/mikeyuniverse/neo4j-cdc-go/nats"
 	"github.com/mikeyuniverse/neo4j-cdc-go/neo4j"
 	"github.com/mikeyuniverse/neo4j-cdc-go/proc"
@@ -40,9 +39,8 @@ func main() {
 	defer q.Close(ctx) // TODO: check for already cancelled context
 
 	publishAll := PublishAllHandler{
-		subject:     "cdc.event",
-		idGenerator: func() string { return shortuuid.New() },
-		p:           q,
+		subject: "cdc.event",
+		p:       q,
 	}
 
 	p := proc.New(
