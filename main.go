@@ -34,9 +34,8 @@ func main() {
 	}
 
 	for _, l := range logs {
-		fmt.Printf("%s - %d - Type: %s |Operation: %s\n", l.ID, l.TxID, l.Event.EventType, l.Event.Operation)
+		fmt.Printf("%s - %d - Type: %s | Operation: %s\n", l.ID, l.TxID, l.Event.EventType, l.Event.Operation)
 	}
-
 }
 
 func exitErr(err error) {
