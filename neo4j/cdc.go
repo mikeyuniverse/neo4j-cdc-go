@@ -2,26 +2,46 @@ package neo4j
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"time"
+	"log/slog"
 
+	"github.com/mikeyuniverse/neo4j-cdc-go/entities"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 const (
 	cdcEarliestQuery = `CALL db.cdc.earliest()`
-	logQuery         = `
-		CALL db.cdc.query($id)
+
+	logQuery = `
+		CALL db.cdc.query($id, [
+    		{select: "e"}
+    	])
 		YIELD id, txId, seq, metadata, event
 		RETURN id, txId, seq, metadata, event
-		LIMIT $limit
-	`
+		LIMIT $limit`
+
+	showDatabasesWithoutCDC = `
+		SHOW DATABASES
+		YIELD name, options
+		WHERE
+		  (options["txLogEnrichment"] IS NULL
+		  OR options["txLogEnrichment"] = 'OFF')
+		  AND name <> 'system'
+		RETURN name`
+
+	changeCDCQuery = `ALTER DATABASE $dbname SET OPTION txLogEnrichment $cdc`
 )
 
-func (n *Neo4j) Earliest(ctx context.Context) (string, error) {
+func (n *Neo4j) Earliest(ctx context.Context, database string) (string, error) {
+	if database == "" {
+		return "", errors.New("empty database name")
+	}
+
 	s := n.d.NewSession(ctx, neo4j.SessionConfig{
-		AccessMode: neo4j.AccessModeRead,
-		FetchSize:  1,
+		AccessMode:   neo4j.AccessModeRead,
+		DatabaseName: database,
+		FetchSize:    1,
 	})
 
 	results, err := s.Run(ctx, cdcEarliestQuery, nil, neo4j.WithTxTimeout(txTimeout))
@@ -39,76 +59,94 @@ func (n *Neo4j) Earliest(ctx context.Context) (string, error) {
 	return earliestID, nil
 }
 
-type TxLog struct {
-	// Top-level fields
-	ID       string         `json:"id"`
-	TxID     int64          `json:"txId"`
-	Seq      int64          `json:"seq"`
-	Metadata *TxLogMetadata `json:"metadata,omitempty"`
-	Event    *TxLogEvent    `json:"event,omitempty"`
-}
-
-// TxLogMetadata contains transaction metadata
-type TxLogMetadata struct {
-	DatabaseName      string
-	ExecutingUser     string
-	AuthenticatedUser string
-	CaptureMode       string
-	ConnectionClient  string
-	ServerID          string
-	ConnectionType    string
-	ConnectionServer  string
-	TxStartTime       time.Time
-	TxCommitTime      time.Time
-	TxMetadata        map[string]any
-}
-
-// TxLogEvent contains the actual change event data
-type TxLogEvent struct {
-	ElementID string                      `json:"elementId,omitempty"`
-	Operation string                      `json:"operation,omitempty"` // "c" for create, "u" for update, "d" for delete
-	Keys      map[string][]map[string]any `json:"keys,omitempty"`
-	Labels    []string                    `json:"labels,omitempty"`    // For node events
-	EventType string                      `json:"eventType,omitempty"` // "n" for node, "r" for relationship
-	State     *TxLogState                 `json:"state,omitempty"`
-}
-
-// TxLogState contains before and after states
-type TxLogState struct {
-	Before *TxLogEntityState `json:"before,omitempty"`
-	After  *TxLogEntityState `json:"after,omitempty"`
-}
-
-// TxLogEntityState represents the state of a node or relationship
-type TxLogEntityState struct {
-	Properties map[string]any `json:"properties,omitempty"`
-	Labels     []string       `json:"labels,omitempty"` // For nodes
-}
-
-func (n *Neo4j) LogQuery(ctx context.Context, id string, limit uint) ([]*TxLog, error) {
+func (n *Neo4j) GetCDCItem(ctx context.Context, database string, id string, limit uint) ([]*entities.TxLog, error) {
+	if database == "" {
+		return nil, errors.New("empty database name")
+	}
 	if id == "" {
-		return nil, fmt.Errorf("empty id")
+		return nil, errors.New("empty id")
 	}
 	if limit == 0 {
-		return nil, fmt.Errorf("limit is 0")
+		return nil, errors.New("limit is 0")
 	}
 
-	s := n.d.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-
-	results, err := s.Run(ctx, logQuery, map[string]any{
+	var logs []*entities.TxLog
+	params := map[string]any{
 		"id":    id,
 		"limit": limit,
-	}, neo4j.WithTxTimeout(txTimeout))
-	if err != nil {
-		return nil, fmt.Errorf("do query: %w", err)
 	}
 
-	logs, err := neo4j.CollectTWithContext(ctx, results, func(r *neo4j.Record) (*TxLog, error) {
-		return txLog(r)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("collect logs: %w", err)
+	tries := 1
+
+	for {
+		s := n.d.NewSession(ctx, neo4j.SessionConfig{
+			AccessMode:   neo4j.AccessModeRead,
+			DatabaseName: database,
+		})
+
+		results, err := s.Run(ctx, logQuery, params, neo4j.WithTxTimeout(txTimeout))
+		if err != nil {
+			if neo4j.IsRetryable(err) {
+				tries++
+
+				slog.Debug(
+					"retrying on connectivity error",
+					"tries", tries)
+
+				err = s.Close(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("close session: %w", err)
+				}
+				continue
+			}
+			return nil, fmt.Errorf("do query: %w", err)
+		}
+
+		logs, err = neo4j.CollectTWithContext(ctx, results, func(r *neo4j.Record) (*entities.TxLog, error) {
+			return txLog(r)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("collect logs: %w", err)
+		}
+
+		err = s.Close(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("close session: %w", err)
+		}
+		break
+
 	}
 
 	return logs, nil
+}
+
+// FIXME: update all databases in single query
+func (n *Neo4j) EnableFullCDC(ctx context.Context, databases []string) error {
+	s := n.d.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+
+	result, err := s.Run(ctx, showDatabasesWithoutCDC, nil, neo4j.WithTxTimeout(txTimeout))
+	if err != nil {
+		return fmt.Errorf("run query: %w", err)
+	}
+
+	databases, err = neo4j.CollectTWithContext(ctx, result, func(r *neo4j.Record) (string, error) {
+		return stringFromRecord(r, "name")
+	})
+
+	for _, db := range databases {
+		result, err := s.Run(ctx, changeCDCQuery, map[string]any{
+			"dbname": db,
+			"cdc":    "FULL",
+		}, neo4j.WithTxTimeout(txTimeout))
+		if err != nil {
+			return fmt.Errorf("do query for %q: %w", db, err)
+		}
+
+		_, err = result.Consume(ctx)
+		if err != nil {
+			return fmt.Errorf("consume: %w", err)
+		}
+	}
+
+	return nil
 }
