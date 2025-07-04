@@ -1,0 +1,18 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "label": "cdc-reader",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "debug",
+    "program": ".",
+    "env": {
+      "NEO4J_DSN": "neo4j://localhost:7687",
+      "NEO4J_USERNAME": "neo4j",
+      "NEO4J_PASSWORD": "neo4j_pass"
+    }
+  }
+]
