@@ -38,7 +38,32 @@ func main() {
 	}
 }
 
-func exitErr(err error) {
-	slog.Error(err.Error())
-	os.Exit(1)
+type LogType int
+
+const (
+	NodeCreated = iota + 1
+	NodeUpdated
+	NodeDeleted
+	RelCreated
+	RelUpdated
+	RelDeleted
+)
+
+func Switcher(ctx context.Context, log *entities.TxLog) error {
+	if log.Event == nil {
+		return fmt.Errorf("event is nil for log with id %q and metadata %+v", log.ID, log.Metadata)
+	}
+	
+	if log.Event.EventType == entities.Node {
+		
+	} else if log.Event.EventType == entities.Relation
+
+	switch log.Event.EventType {
+	case entities.Node:
+		return nil
+	case entities.Relation:
+		return nil
+	default:
+		return fmt.Errorf("unknown event type: %+v", log)
+	}
 }
