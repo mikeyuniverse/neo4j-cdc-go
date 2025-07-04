@@ -1,0 +1,23 @@
+services:
+  neo4j:
+    image: neo4j:2025.06.0-enterprise
+    restart: always
+    ports:
+      - "7687:7687"
+      - "7474:7474"
+    # volumes:
+    #   - "./backups:/backups"
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_AUTH: neo4j/neo4j_pass
+      NEO4J_PLUGINS: '["apoc"]'
+      # NEO4J_apoc_import_file_enabled: "true"
+      # NEO4J_apoc_export_file_enabled: "true"
+
+  nats:
+    image: nats:2.8.4-alpine
+    restart: on-failure
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: -js -m 8222
