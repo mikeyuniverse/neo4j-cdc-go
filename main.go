@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -20,10 +21,20 @@ func main() {
 		return
 	}
 
-	_, err = n.Earliest(ctx)
+	earliestID, err := n.Earliest(ctx)
 	if err != nil {
 		exitErr(err)
 		return
+	}
+
+	logs, err := n.LogQuery(ctx, earliestID, 2)
+	if err != nil {
+		exitErr(err)
+		return
+	}
+
+	for _, l := range logs {
+		fmt.Printf("%s - %d - Type: %s |Operation: %s\n", l.ID, l.TxID, l.Event.EventType, l.Event.Operation)
 	}
 
 }
