@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mikeyuniverse/neo4j-cdc-go/entities"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 func stringFromRecord(r *neo4j.Record, key string) (string, error) {
-	id, isNil, err := neo4j.GetRecordValue[string](r, key)
+	value, isNil, err := neo4j.GetRecordValue[string](r, key)
 	if err != nil {
 		return "", fmt.Errorf("get %q: %w", key, err)
 	}
@@ -17,15 +18,15 @@ func stringFromRecord(r *neo4j.Record, key string) (string, error) {
 		return "", fmt.Errorf("%q is not found", key)
 	}
 
-	if id == "" {
+	if value == "" {
 		return "", fmt.Errorf("value is empty")
 	}
 
-	return id, nil
+	return value, nil
 }
 
-func txLog(r *neo4j.Record) (*TxLog, error) {
-	log := &TxLog{}
+func txLog(r *neo4j.Record) (*entities.TxLog, error) {
+	log := &entities.TxLog{}
 
 	// Parse top-level fields
 	id, err := stringFromRecord(r, "id")
@@ -77,8 +78,8 @@ func txLog(r *neo4j.Record) (*TxLog, error) {
 	return log, nil
 }
 
-func parseTxLogMetadata(metadata map[string]any) (*TxLogMetadata, error) {
-	meta := &TxLogMetadata{}
+func parseTxLogMetadata(metadata map[string]any) (*entities.TxLogMetadata, error) {
+	meta := &entities.TxLogMetadata{}
 
 	if val, ok := metadata["executingUser"].(string); ok {
 		meta.ExecutingUser = val
@@ -86,6 +87,10 @@ func parseTxLogMetadata(metadata map[string]any) (*TxLogMetadata, error) {
 
 	if val, ok := metadata["authenticatedUser"].(string); ok {
 		meta.AuthenticatedUser = val
+	}
+
+	if val, ok := metadata["databaseName"].(string); ok {
+		meta.DatabaseName = val
 	}
 
 	if val, ok := metadata["captureMode"].(string); ok {
@@ -123,8 +128,8 @@ func parseTxLogMetadata(metadata map[string]any) (*TxLogMetadata, error) {
 	return meta, nil
 }
 
-func parseTxLogEvent(event map[string]any) (*TxLogEvent, error) {
-	evt := &TxLogEvent{}
+func parseTxLogEvent(event map[string]any) (*entities.TxLogEvent, error) {
+	evt := &entities.TxLogEvent{}
 
 	if val, ok := event["elementId"].(string); ok {
 		evt.ElementID = val
@@ -146,7 +151,7 @@ func parseTxLogEvent(event map[string]any) (*TxLogEvent, error) {
 	}
 
 	if val, ok := event["eventType"].(string); ok {
-		evt.EventType = val
+		evt.EventType = entities.EventType(val)
 	}
 
 	if val, ok := event["state"].(map[string]any); ok {
@@ -158,7 +163,7 @@ func parseTxLogEvent(event map[string]any) (*TxLogEvent, error) {
 	}
 
 	if val, ok := event["operation"].(string); ok {
-		evt.Operation = val
+		evt.Operation = entities.Operation(val)
 	}
 
 	if val, ok := event["labels"].([]any); ok {
@@ -173,8 +178,8 @@ func parseTxLogEvent(event map[string]any) (*TxLogEvent, error) {
 	return evt, nil
 }
 
-func parseTxLogState(state map[string]any) (*TxLogState, error) {
-	s := &TxLogState{}
+func parseTxLogState(state map[string]any) (*entities.TxLogState, error) {
+	s := &entities.TxLogState{}
 
 	if val, ok := state["before"].(map[string]any); ok {
 		before, err := parseTxLogEntityState(val)
@@ -195,8 +200,8 @@ func parseTxLogState(state map[string]any) (*TxLogState, error) {
 	return s, nil
 }
 
-func parseTxLogEntityState(entityState map[string]any) (*TxLogEntityState, error) {
-	state := &TxLogEntityState{}
+func parseTxLogEntityState(entityState map[string]any) (*entities.TxLogEntityState, error) {
+	state := &entities.TxLogEntityState{}
 
 	if val, ok := entityState["properties"].(map[string]any); ok {
 		state.Properties = val
