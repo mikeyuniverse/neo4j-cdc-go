@@ -2,68 +2,76 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
+	"github.com/lithammer/shortuuid"
+	"github.com/mikeyuniverse/neo4j-cdc-go/nats"
 	"github.com/mikeyuniverse/neo4j-cdc-go/neo4j"
+	"github.com/mikeyuniverse/neo4j-cdc-go/proc"
 )
 
 func main() {
+	setSlogLevel()
+
 	slog.Info("starting application...")
 
 	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGKILL)
+	defer cancel()
 
 	n := neo4j.New()
 	err := n.Connect(ctx)
 	if err != nil {
-		exitErr(err)
+		slog.Error("on neo4j connecting", "error", err.Error())
 		return
 	}
+	defer n.Close(ctx) // TODO: check for already cancelled context
 
-	earliestID, err := n.Earliest(ctx)
+	q := nats.New()
+	err = q.Connect(ctx)
 	if err != nil {
-		exitErr(err)
+		slog.Error("on nats connecting", "error", err.Error())
 		return
 	}
+	defer q.Close(ctx) // TODO: check for already cancelled context
 
-	logs, err := n.LogQuery(ctx, earliestID, 2)
+	publishAll := PublishAllHandler{
+		subject:     "cdc.event",
+		idGenerator: func() string { return shortuuid.New() },
+		p:           q,
+	}
+
+	p := proc.New(
+		ctx, n, q,
+		proc.TimerMiddleware(
+			proc.LoggerMiddleware(
+				proc.Matcher(publishAll),
+			),
+		),
+	)
+
+	err = p.Run(ctx)
 	if err != nil {
-		exitErr(err)
+		slog.Error("error on run", "error", err)
 		return
 	}
 
-	for _, l := range logs {
-		fmt.Printf("%s - %d - Type: %s | Operation: %s\n", l.ID, l.TxID, l.Event.EventType, l.Event.Operation)
-	}
+	slog.Info("application finished without errors")
 }
 
-type LogType int
+func setSlogLevel() {
+	lvl := os.Getenv("SLOG_LEVEL")
 
-const (
-	NodeCreated = iota + 1
-	NodeUpdated
-	NodeDeleted
-	RelCreated
-	RelUpdated
-	RelDeleted
-)
-
-func Switcher(ctx context.Context, log *entities.TxLog) error {
-	if log.Event == nil {
-		return fmt.Errorf("event is nil for log with id %q and metadata %+v", log.ID, log.Metadata)
+	data := map[string]slog.Level{
+		"debug": slog.LevelDebug,
+		"info":  slog.LevelInfo,
+		"warn":  slog.LevelWarn,
+		"error": slog.LevelError,
 	}
-	
-	if log.Event.EventType == entities.Node {
-		
-	} else if log.Event.EventType == entities.Relation
 
-	switch log.Event.EventType {
-	case entities.Node:
-		return nil
-	case entities.Relation:
-		return nil
-	default:
-		return fmt.Errorf("unknown event type: %+v", log)
-	}
+	slog.SetLogLoggerLevel(data[strings.ToLower(lvl)])
 }
