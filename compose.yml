@@ -5,6 +5,15 @@ services:
     ports:
       - "7687:7687"
       - "7474:7474"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "1"
+          memory: 1G
+    # TODO: use backup for load testing
     # volumes:
     #   - "./backups:/backups"
     environment:
@@ -17,6 +26,14 @@ services:
   nats:
     image: nats:2.8.4-alpine
     restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 200M
+        reservations:
+          cpus: "0.25"
+          memory: 20M
     ports:
       - "4222:4222"
       - "8222:8222"
