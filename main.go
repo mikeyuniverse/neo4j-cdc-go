@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/mikeyuniverse/neo4j-cdc-go/nats"
 	"github.com/mikeyuniverse/neo4j-cdc-go/neo4j"
@@ -38,19 +40,34 @@ func main() {
 	}
 	defer q.Close(ctx) // TODO: check for already cancelled context
 
-	publishAll := PublishAllHandler{
-		subject: "cdc.event",
-		p:       q,
+	handle := &CounterHandler{
+		mu:   sync.Mutex{},
+		data: make(map[string]int64, 10),
 	}
 
 	p := proc.New(
 		ctx, n, q,
 		proc.TimerMiddleware(
 			proc.LoggerMiddleware(
-				proc.Matcher(publishAll),
+				proc.Matcher(handle),
 			),
 		),
 	)
+
+	// TODO: implement a ticker to periodically print the counter data
+	// Is it really necessary?
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			handle.Print()
+			time.Sleep(time.Second)
+		}
+	}()
 
 	err = p.Run(ctx)
 	if err != nil {

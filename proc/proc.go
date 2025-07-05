@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	logPageSize = 10
+	logPageSize = 500
 	bufferSize  = 100
 	workers     = 10
 )
