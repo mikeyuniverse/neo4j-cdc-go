@@ -40,6 +40,9 @@ func (p *Proc) readQueries(ctx context.Context, db, logID string) error {
 	t := time.NewTicker(tickInterval)
 	defer t.Stop()
 
+	// throttle marker if there is no logs
+	var noLogsMarker bool
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -55,6 +58,18 @@ func (p *Proc) readQueries(ctx context.Context, db, logID string) error {
 			return fmt.Errorf("do log query: %w", err)
 		}
 
+		noLogsMarker = len(logs) == 0
+
+		// when there is no logs, reset the ticker and thottle
+		if noLogsMarker {
+			t.Reset(tickInterval)
+			continue
+		}
+
+		// reset ticker to minimal delay
+		// for better performance
+		t.Reset(time.Nanosecond)
+
 		if len(logs) > 0 {
 			logID = logs[len(logs)-1].ID
 		}
@@ -62,7 +77,5 @@ func (p *Proc) readQueries(ctx context.Context, db, logID string) error {
 		for _, l := range logs {
 			p.txs <- l
 		}
-
-		t.Reset(tickInterval)
 	}
 }
